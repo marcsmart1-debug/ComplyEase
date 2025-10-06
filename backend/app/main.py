@@ -179,8 +179,8 @@ async def stripe_webhook(request: Request):
                             create_subscription(
                                 user_id=user.id,
                                 stripe_subscription_id=subscription_id,
-                                status=subscription.status,
-                                current_period_end=datetime.fromtimestamp(subscription.current_period_end)
+                                status=subscription["status"],
+                                current_period_end=datetime.fromtimestamp(subscription["current_period_end"])
                             )
                             logger.info(f"Created subscription {subscription_id} for user {user.id} from checkout.session.completed")
                         except Exception as e:
