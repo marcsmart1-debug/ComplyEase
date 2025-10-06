@@ -177,6 +177,24 @@ async def stripe_webhook(request: Request):
             else:
                 logger.warning(f"No customer email in checkout session: {session.get('id')}")
         
+        elif event["type"] == "customer.subscription.created":
+            subscription = event["data"]["object"]
+            customer_id = subscription["customer"]
+            subscription_id = subscription["id"]
+            logger.info(f"Processing customer.subscription.created for customer {customer_id}")
+            
+            user = get_user_by_stripe_customer_id(customer_id)
+            if user:
+                create_subscription(
+                    user_id=user.id,
+                    stripe_subscription_id=subscription_id,
+                    status=subscription["status"],
+                    current_period_end=datetime.fromtimestamp(subscription["current_period_end"])
+                )
+                logger.info(f"Created subscription for user {user.id} from customer.subscription.created event")
+            else:
+                logger.warning(f"No user found for Stripe customer: {customer_id}")
+        
         elif event["type"] == "customer.subscription.updated":
             subscription = event["data"]["object"]
             customer_id = subscription["customer"]
