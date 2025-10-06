@@ -276,3 +276,32 @@ async def get_config():
     return {
         "stripePublishableKey": os.getenv("STRIPE_PUBLISHABLE_KEY")
     }
+
+@app.get("/api/debug/database-state")
+async def debug_database_state():
+    from app.database import users_db, subscriptions_db, email_to_user_id
+    
+    users_list = []
+    for user_id, user in users_db.items():
+        users_list.append({
+            "id": user.id,
+            "email": user.email,
+            "stripe_customer_id": user.stripe_customer_id,
+            "created_at": user.created_at.isoformat()
+        })
+    
+    subscriptions_list = []
+    for user_id, sub in subscriptions_db.items():
+        subscriptions_list.append({
+            "user_id": sub.user_id,
+            "stripe_subscription_id": sub.stripe_subscription_id,
+            "status": sub.status,
+            "current_period_end": sub.current_period_end.isoformat(),
+            "created_at": sub.created_at.isoformat()
+        })
+    
+    return {
+        "users": users_list,
+        "subscriptions": subscriptions_list,
+        "email_to_user_id_mapping": email_to_user_id
+    }
