@@ -198,8 +198,16 @@ async def stripe_webhook(request: Request):
             subscription_id = subscription["id"]
             logger.info(f"Processing customer.subscription.created for customer {customer_id}")
             
+            logger.info(f"DEBUG: Available keys in subscription object: {list(subscription.keys())}")
+            logger.info(f"DEBUG: Subscription status: {subscription.get('status', 'NOT FOUND')}")
+            logger.info(f"DEBUG: Subscription current_period_end: {subscription.get('current_period_end', 'NOT FOUND')}")
+            
             user = get_user_by_stripe_customer_id(customer_id)
             if user:
+                if "current_period_end" not in subscription:
+                    logger.error(f"ERROR: current_period_end not found in subscription object. Available keys: {list(subscription.keys())}")
+                    return {"status": "error", "message": "current_period_end field missing from subscription object"}
+                
                 create_subscription(
                     user_id=user.id,
                     stripe_subscription_id=subscription_id,
