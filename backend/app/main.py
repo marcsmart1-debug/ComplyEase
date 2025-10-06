@@ -184,7 +184,7 @@ async def stripe_webhook(request: Request):
                             current_period_end=datetime.fromtimestamp(subscription.current_period_end)
                         )
                         logger.info(f"Created subscription record for user {user.id}")
-                    except stripe.error.StripeError as e:
+                    except Exception as e:
                         logger.error(f"Stripe API error retrieving subscription {subscription_id}: {e}")
                         return {"status": "error", "message": "Failed to retrieve subscription details"}
                 else:
