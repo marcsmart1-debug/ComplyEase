@@ -5,6 +5,7 @@ from typing import List
 import stripe
 import os
 from dotenv import load_dotenv
+import logging
 
 from app.models import UserCreate, UserLogin, Token, Article
 from app.auth import (
@@ -33,6 +34,9 @@ from app.services import (
 )
 
 load_dotenv()
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
@@ -141,56 +145,88 @@ async def stripe_webhook(request: Request):
         event = stripe.Webhook.construct_event(
             payload, sig_header, STRIPE_WEBHOOK_SECRET
         )
-    except ValueError:
+    except ValueError as e:
+        logger.error(f"Invalid webhook payload: {e}")
         raise HTTPException(status_code=400, detail="Invalid payload")
     except Exception as e:
         if "signature" in str(e).lower():
+            logger.error(f"Invalid webhook signature: {e}")
             raise HTTPException(status_code=400, detail="Invalid signature")
+        logger.error(f"Webhook error: {e}")
         raise HTTPException(status_code=400, detail=str(e))
     
-    if event["type"] == "checkout.session.completed":
-        session = event["data"]["object"]
-        customer_id = session["customer"]
-        subscription_id = session["subscription"]
+    logger.info(f"Received webhook event: {event['type']}")
+    
+    try:
+        if event["type"] == "checkout.session.completed":
+            session = event["data"]["object"]
+            customer_id = session["customer"]
+            subscription_id = session["subscription"]
+            
+            customer_email = session.get("customer_email") or session.get("customer_details", {}).get("email")
+            logger.info(f"Processing checkout.session.completed for email: {customer_email}")
+            
+            if customer_email:
+                user = get_user_by_email(customer_email)
+                if user:
+                    logger.info(f"Found user {user.id} for email {customer_email}")
+                    update_user_stripe_customer(user.id, customer_id)
+                    logger.info(f"Updated user {user.id} with Stripe customer {customer_id}")
+                    
+                    try:
+                        subscription = stripe.Subscription.retrieve(subscription_id)
+                        logger.info(f"Retrieved subscription {subscription_id} with status {subscription.status}")
+                        
+                        create_subscription(
+                            user_id=user.id,
+                            stripe_subscription_id=subscription_id,
+                            status=subscription.status,
+                            current_period_end=datetime.fromtimestamp(subscription.current_period_end)
+                        )
+                        logger.info(f"Created subscription record for user {user.id}")
+                    except stripe.error.StripeError as e:
+                        logger.error(f"Stripe API error retrieving subscription {subscription_id}: {e}")
+                        return {"status": "error", "message": "Failed to retrieve subscription details"}
+                else:
+                    logger.warning(f"No user found for email: {customer_email}")
+            else:
+                logger.warning(f"No customer email in checkout session: {session.get('id')}")
         
-        customer_email = session.get("customer_email") or session.get("customer_details", {}).get("email")
-        
-        if customer_email:
-            user = get_user_by_email(customer_email)
+        elif event["type"] == "customer.subscription.updated":
+            subscription = event["data"]["object"]
+            customer_id = subscription["customer"]
+            logger.info(f"Processing customer.subscription.updated for customer {customer_id}")
+            
+            user = get_user_by_stripe_customer_id(customer_id)
             if user:
-                update_user_stripe_customer(user.id, customer_id)
-                
-                subscription = stripe.Subscription.retrieve(subscription_id)
-                create_subscription(
+                update_subscription(
                     user_id=user.id,
-                    stripe_subscription_id=subscription_id,
-                    status=subscription.status,
-                    current_period_end=datetime.fromtimestamp(subscription.current_period_end)
+                    status=subscription["status"],
+                    current_period_end=datetime.fromtimestamp(subscription["current_period_end"])
                 )
-    
-    elif event["type"] == "customer.subscription.updated":
-        subscription = event["data"]["object"]
-        customer_id = subscription["customer"]
+                logger.info(f"Updated subscription for user {user.id}")
+            else:
+                logger.warning(f"No user found for Stripe customer: {customer_id}")
         
-        user = get_user_by_stripe_customer_id(customer_id)
-        if user:
-            update_subscription(
-                user_id=user.id,
-                status=subscription["status"],
-                current_period_end=datetime.fromtimestamp(subscription["current_period_end"])
-            )
-    
-    elif event["type"] == "customer.subscription.deleted":
-        subscription = event["data"]["object"]
-        customer_id = subscription["customer"]
+        elif event["type"] == "customer.subscription.deleted":
+            subscription = event["data"]["object"]
+            customer_id = subscription["customer"]
+            logger.info(f"Processing customer.subscription.deleted for customer {customer_id}")
+            
+            user = get_user_by_stripe_customer_id(customer_id)
+            if user:
+                update_subscription(
+                    user_id=user.id,
+                    status="canceled",
+                    current_period_end=datetime.fromtimestamp(subscription["current_period_end"])
+                )
+                logger.info(f"Canceled subscription for user {user.id}")
+            else:
+                logger.warning(f"No user found for Stripe customer: {customer_id}")
         
-        user = get_user_by_stripe_customer_id(customer_id)
-        if user:
-            update_subscription(
-                user_id=user.id,
-                status="canceled",
-                current_period_end=datetime.fromtimestamp(subscription["current_period_end"])
-            )
+    except Exception as e:
+        logger.error(f"Error processing webhook event {event['type']}: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}
     
     return {"status": "success"}
 
