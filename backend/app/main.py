@@ -161,9 +161,10 @@ async def stripe_webhook(request: Request):
         if event["type"] == "checkout.session.completed":
             session = event["data"]["object"]
             customer_id = session["customer"]
+            subscription_id = session.get("subscription")
             
             customer_email = session.get("customer_email") or session.get("customer_details", {}).get("email")
-            logger.info(f"Processing checkout.session.completed for email: {customer_email}")
+            logger.info(f"Processing checkout.session.completed for email: {customer_email}, subscription: {subscription_id}")
             
             if customer_email:
                 user = get_user_by_email(customer_email)
@@ -171,7 +172,21 @@ async def stripe_webhook(request: Request):
                     logger.info(f"Found user {user.id} for email {customer_email}")
                     update_user_stripe_customer(user.id, customer_id)
                     logger.info(f"Updated user {user.id} with Stripe customer {customer_id}")
-                    logger.info(f"Subscription will be created when customer.subscription.updated event arrives")
+                    
+                    if subscription_id:
+                        try:
+                            subscription = stripe.Subscription.retrieve(subscription_id)
+                            create_subscription(
+                                user_id=user.id,
+                                stripe_subscription_id=subscription_id,
+                                status=subscription.status,
+                                current_period_end=datetime.fromtimestamp(subscription.current_period_end)
+                            )
+                            logger.info(f"Created subscription {subscription_id} for user {user.id} from checkout.session.completed")
+                        except Exception as e:
+                            logger.error(f"Failed to retrieve/create subscription {subscription_id}: {e}", exc_info=True)
+                    else:
+                        logger.warning(f"No subscription ID in checkout session for user {user.id}")
                 else:
                     logger.warning(f"No user found for email: {customer_email}")
             else:
