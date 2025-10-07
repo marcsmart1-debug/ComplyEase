@@ -23,8 +23,7 @@ from app.database import (
     create_subscription,
     get_subscription_by_user_id,
     update_subscription,
-    get_user_by_stripe_customer_id,
-    email_to_user_id
+    get_user_by_stripe_customer_id
 )
 from app.services import (
     fetch_fca_news,
@@ -37,6 +36,10 @@ load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+from app.db_session import init_db
+init_db()
+logger.info("Database initialized")
 
 app = FastAPI()
 
@@ -318,29 +321,37 @@ async def get_config():
 
 @app.get("/api/debug/database-state")
 async def debug_database_state():
-    from app.database import users_db, subscriptions_db, email_to_user_id
+    from app.db_models import UserDB, SubscriptionDB
+    from app.db_session import get_db_session
     
     users_list = []
-    for user_id, user in users_db.items():
-        users_list.append({
-            "id": user.id,
-            "email": user.email,
-            "stripe_customer_id": user.stripe_customer_id,
-            "created_at": user.created_at.isoformat()
-        })
-    
     subscriptions_list = []
-    for user_id, sub in subscriptions_db.items():
-        subscriptions_list.append({
-            "user_id": sub.user_id,
-            "stripe_subscription_id": sub.stripe_subscription_id,
-            "status": sub.status,
-            "current_period_end": sub.current_period_end.isoformat(),
-            "created_at": sub.created_at.isoformat()
-        })
+    email_to_user_id = {}
+    
+    with get_db_session() as session:
+        users = session.query(UserDB).all()
+        for user in users:
+            users_list.append({
+                "id": user.id,
+                "email": user.email,
+                "stripe_customer_id": user.stripe_customer_id,
+                "created_at": user.created_at.isoformat()
+            })
+            email_to_user_id[user.email] = user.id
+        
+        subscriptions = session.query(SubscriptionDB).all()
+        for sub in subscriptions:
+            subscriptions_list.append({
+                "user_id": sub.user_id,
+                "stripe_subscription_id": sub.stripe_subscription_id,
+                "status": sub.status,
+                "current_period_end": sub.current_period_end.isoformat(),
+                "created_at": sub.created_at.isoformat()
+            })
     
     return {
         "users": users_list,
         "subscriptions": subscriptions_list,
-        "email_to_user_id_mapping": email_to_user_id
+        "email_to_user_id_mapping": email_to_user_id,
+        "database_type": "PostgreSQL"
     }
