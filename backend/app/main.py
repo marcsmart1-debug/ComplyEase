@@ -23,8 +23,7 @@ from app.database import (
     create_subscription,
     get_subscription_by_user_id,
     update_subscription,
-    get_user_by_stripe_customer_id,
-    email_to_user_id
+    get_user_by_stripe_customer_id
 )
 from app.services import (
     fetch_fca_news,
